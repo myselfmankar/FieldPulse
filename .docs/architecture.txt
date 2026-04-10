@@ -1,0 +1,88 @@
+# Requirements Gathering (STRICT ADHERENCE TO PDF)
+
+## 1. Explicitly Required Stack
+- **GoFiber**: For the API Gateway.
+- **gRPC + Protobuf**: For all inter-service communication.
+- **SQLBoiler + pgx (v5)**: For the PostgreSQL Device Registry.
+- **TimescaleDB**: For telemetry (Strictly Raw SQL/pgx, NO ORM).
+- **Redis (Mandatory)**: For deduplication and alert suppression logic.
+- **OpenTelemetry & Uptrace**: For distributed tracing.
+- **Eclipse Mosquitto**: As the internal (mTLS) and remote (plain) broker.
+- **YAML/TOML**: For connector configuration.
+
+## 2. Standard Library First Approach (No assumed extras)
+- **CLI/Arguments**: Standard `flag` package.
+- **Logging**: Standard `log` package.
+- **Configuration Parsing**: Standard `encoding/json` or `gopkg.in/yaml.v3`.
+- **Testing**: Standard `testing` package.
+
+## 3. Explicitly Forbidden / Not Requested
+- **NO Service Mesh**.
+- **NO Auto-migrations** (use manual SQL files).
+- **NO ORM for TimescaleDB**.
+- **NO OpenFGA, LLMs, or Regex-extractors (Bonuses ignored)**.
+
+# Architecture Design (v2 - Pruned)
+
+```mermaid
+graph TD
+    Client[HTTP/REST Client] -->|GoFiber| Gateway[API Gateway]
+    
+    subgraph "Core Services (Go + gRPC)"
+        Gateway -->|gRPC| DeviceSvc[Device Service]
+        Gateway -->|gRPC| TelemetrySvc[Telemetry Service]
+        
+        DeviceSvc -->|SQLBoiler| Postgres[(PostgreSQL Registry)]
+        TelemetrySvc -->|pgx + Raw SQL| Timescale[(TimescaleDB)]
+        
+        AlertSvc[Alert Service] -->|gRPC| DeviceSvc
+    end
+    
+    subgraph "Messaging & State"
+        InternalMQTT((Mosquitto mTLS))
+        RemoteMQTT((Mosquitto Plain))
+        Redis[(Redis)]
+        
+        Simulator -->|Pub| InternalMQTT
+        Connector -->|Sub Remote| RemoteMQTT
+        Connector -->|Pub Internal| InternalMQTT
+        
+        InternalMQTT --> TelemetrySvc
+        InternalMQTT --> AlertSvc
+        
+        TelemetrySvc & AlertSvc & Connector --- Redis
+    end
+    
+    subgraph "Observability"
+        AllServices[All Services] -->|OTLP| Uptrace[Uptrace]
+    end
+```
+
+# Data Flow Explanation
+
+1. **Device/Simulator** connects to the **Internal Mosquitto** via mTLS (Port 8883).
+2. Device publishes JSON to `devices/{device_id}/telemetry`.
+3. **Telemetry Service** receives the message:
+    - **Validate**: Checks timestamp (no future) and JSON structure.
+    - **Deduplicate**: Checks Redis for `{device_id}:{timestamp}`.
+    - **Persist**: Inserts into **TimescaleDB** hypertable using raw SQL.
+4. **Alert Service** (independent subscriber) receives the same message:
+    - Checks Postgres for device threshold rules.
+    - If breached: verifies Redis if an alert was sent in the last 5 minutes.
+    - If not suppressed: publishes to `alerts/{device_id}` and updates Redis.
+
+### 2. External Bridging Flow
+1. **Connector** connects to **Remote MQTT Broker**.
+2. Receives a message in a "Foreign Schema" (e.g., different keys).
+3. Connector extracts `device_id` based on topic segment.
+4. Connector calls `DeviceSvc.GetDevice` (cached in Redis) to verify identity.
+5. Connector maps keys $\rightarrow$ internal canonical format.
+6. Connector republishes to **Internal Mosquitto**.
+
+### 3. Provisioning Flow
+1. **API Gateway** calls `CreateDevice`.
+2. **Device Service**:
+    - Generates RSA-2048 keypair.
+    - Signs a CSR using the **Platform RootCA**.
+    - Stores metadata + public cert in Postgres.
+    - Returns the private key + cert bundle to the caller (returned once, never stored).

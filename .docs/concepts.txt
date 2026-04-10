@@ -1,0 +1,19 @@
+# FieldPulse IoT Concepts & Insights
+
+## Foreign Schema
+In industrial IoT, different sensors and external brokers often send data in varying formats. The FieldPulse platform expects a canonical "Internal Schema".
+- **Internal Schema:** The standard format (e.g., `temperature_c`, `vibration_hz`).
+- **Foreign Schema:** Any non-standard format from external sources.
+- **Outbound MQTT Connector:** its primary job is to bridge these formats using a mapping configuration.
+
+## Uptrace & OpenTelemetry
+Uptrace is the observability backend recommended in the assignment.
+- **OpenTelemetry:** A framework for generating and collecting telemetry data (traces, metrics, logs).
+- **Traces:** Used to follow a request's lifecycle across microservices (e.g., API Gateway -> Device Service).
+- **Mandatory Deliverable:** A screenshot of a successful end-to-end trace in Uptrace is required for the final submission.
+
+## mTLS Implementation
+Devices connect to the internal broker via mTLS over port 8883.
+- **RootCA:** Managed by the Device Service.
+- **Certificates:** Generated programmatically by the Device Service and never stored (returned once to the device).
+- **Broker Config:** Must enforce `require_certificate true` and `use_identity_as_username true`.

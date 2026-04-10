@@ -1,43 +1,39 @@
 # FieldPulse
 Industrial IoT Backend Platform
 
-# architecture (v1)
+# architecture (v2 - more focus on Open Source Lib)
 # Architecture Design (Mermaid)
 
 ```mermaid
 graph TD
-    Client[HTTP/REST Client] -->|HTTP| Gateway[API Gateway - GoFiber]
+    Client[HTTP/REST Client] -->|GoFiber| Gateway[API Gateway]
     
-    subgraph "Internal Backend Services"
+    subgraph "Core Services (Go + gRPC)"
         Gateway -->|gRPC| DeviceSvc[Device Service]
         Gateway -->|gRPC| TelemetrySvc[Telemetry Service]
         
-        DeviceSvc -->|pgx| Postgres[(PostgreSQL Device Registry)]
-        TelemetrySvc -->|pgx| Timescale[(TimescaleDB Telemetry)]
+        DeviceSvc -->|SQLBoiler| Postgres[(PostgreSQL Registry)]
+        TelemetrySvc -->|pgx + Raw SQL| Timescale[(TimescaleDB)]
         
         AlertSvc[Alert Service] -->|gRPC| DeviceSvc
-        AlertSvc -->|Pub| LocalMQTT
     end
     
-    subgraph "MQTT Infrastructure"
-        LocalMQTT((Internal Mosquitto Broker\nPort 8883 - mTLS))
-        RemoteMQTT((Remote Client Brokers\nPort 1883 - Plain))
+    subgraph "Messaging & State"
+        InternalMQTT((Mosquitto mTLS))
+        RemoteMQTT((Mosquitto Plain))
+        Redis[(Redis)]
         
-        Simulator[Device Simulator] -->|Pub| LocalMQTT
-        Connector[Outbound MQTT Connector] -->|Sub| RemoteMQTT
-        Connector -->|Pub| LocalMQTT
+        Simulator -->|Pub| InternalMQTT
+        Connector -->|Sub Remote| RemoteMQTT
+        Connector -->|Pub Internal| InternalMQTT
         
-        LocalMQTT -->|Sub| TelemetrySvc
-        LocalMQTT -->|Sub| AlertSvc
-    end
-    
-    subgraph "Caching & State"
-        TelemetrySvc --- Redis[(Redis Cache/Dedup)]
-        AlertSvc --- Redis
-        Connector --- Redis
+        InternalMQTT --> TelemetrySvc
+        InternalMQTT --> AlertSvc
+        
+        TelemetrySvc & AlertSvc & Connector --- Redis
     end
     
     subgraph "Observability"
-        Gateway & DeviceSvc & TelemetrySvc & AlertSvc & Connector -->|OTLP| Uptrace[Uptrace Dashboard]
+        AllServices[All Services] -->|OTLP| Uptrace[Uptrace]
     end
 ```
