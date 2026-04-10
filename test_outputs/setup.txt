@@ -1,0 +1,42 @@
+# FieldPulse IoT Backend - Infrastructure Setup Verification Log
+Date: 2026-04-11
+
+This log captures the successful verification of Phase 1: Foundation.
+
+## 1. Device Registry (PostgreSQL) Verification
+Command: docker exec -it fieldpulse-postgres psql -U postgres -d device_registry -c "\dt"
+
+               List of relations
+ Schema |       Name        | Type  |  Owner   
+--------+-------------------+-------+----------
+ public | device_thresholds | table | postgres
+ public | devices           | table | postgres
+(2 rows)
+
+## 2. Telemetry Storage (TimescaleDB) Verification
+Command: docker exec -it fieldpulse-timescaledb psql -U postgres -d telemetry_db -c "\d"
+
+              List of relations
+ Schema |       Name       | Type  |  Owner   
+--------+------------------+-------+----------
+ public | telemetry        | table | postgres
+ public | telemetry_hourly | view  | postgres
+(2 rows)
+
+## 3. mTLS Security Handshake Verification
+Command: go run scratch/test_mqtt_tls.go
+
+SUCCESS: Connected to Mosquitto via mTLS on port 8883!
+
+## 4. MQTT Broker (Mosquitto) Logs
+Command: docker logs fieldpulse-mosquitto
+
+1775845527: mosquitto version 2.0.22 starting
+1775845527: Config loaded from /mosquitto/config/mosquitto.conf.
+1775845527: Opening ipv4 listen socket on port 8883.
+1775845527: Opening ipv6 listen socket on port 8883.
+1775845527: mosquitto version 2.0.22 running
+1775848166: New connection from 172.18.0.1:38664 on port 8883.
+1775848166: New client connected from 172.18.0.1:38664 as infra-test-client (p2, c1, k30, u'test-client').
+1775848166: Received DISCONNECT from infra-test-client
+1775848166: Client infra-test-client disconnected.

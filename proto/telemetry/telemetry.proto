@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package telemetry;
+
+option go_package = "github.com/myselfmankar/FieldPulse/proto/telemetry";
+
+import "google/protobuf/timestamp.proto";
+
+service TelemetryService {
+  rpc QueryTelemetry(QueryTelemetryRequest) returns (QueryTelemetryResponse);
+  rpc GetLatestReading(GetLatestReadingRequest) returns (TelemetryReading);
+}
+
+message metrics {
+  float temperature_c = 1;
+  float vibration_hz = 2;
+  float current_ma = 3;
+}
+
+message TelemetryReading {
+  string device_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  metrics metrics = 3;
+}
+
+message QueryTelemetryRequest {
+  string device_id = 1;
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Timestamp end_time = 3;
+  string resolution = 4; // 1m, 5m, 1h
+}
+
+message TelemetryAggregate {
+  google.protobuf.Timestamp bucket = 1;
+  float mean_temp = 2;
+  float min_temp = 3;
+  float max_temp = 4;
+}
+
+message QueryTelemetryResponse {
+  repeated TelemetryAggregate aggregates = 1;
+}
+
+message GetLatestReadingRequest {
+  string device_id = 1;
+}

@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package device;
+
+option go_package = "github.com/myselfmankar/FieldPulse/proto/device";
+
+service DeviceService {
+  rpc CreateDevice(CreateDeviceRequest) returns (CreateDeviceResponse);
+  rpc GetDevice(GetDeviceRequest) returns (Device);
+  rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
+  rpc UpdateDeviceStatus(UpdateDeviceStatusRequest) returns (Device);
+}
+
+message CreateDeviceRequest {
+  string device_id = 1;
+  string floor = 2;
+  string device_type = 3;
+  string firmware_ver = 4;
+}
+
+message CreateDeviceResponse {
+  string device_id = 1;
+  string broker_url = 2;
+  bytes client_cert_pem = 3;
+  bytes client_key_pem = 4;
+  bytes ca_pem = 5;
+}
+
+message Device {
+  string device_id = 1;
+  string floor = 2;
+  string device_type = 3;
+  string firmware_ver = 4;
+  string status = 5; // active, silent, degraded
+  string created_at = 6;
+}
+
+message GetDeviceRequest {
+  string device_id = 1;
+}
+
+message ListDevicesRequest {
+  string floor = 1;
+  string status = 2;
+}
+
+message ListDevicesResponse {
+  repeated Device devices = 1;
+}
+
+message UpdateDeviceStatusRequest {
+  string device_id = 1;
+  string status = 2;
+}
