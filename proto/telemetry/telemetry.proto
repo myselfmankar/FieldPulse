@@ -35,6 +35,8 @@ message TelemetryAggregate {
   float mean_temp = 2;
   float min_temp = 3;
   float max_temp = 4;
+  float mean_vibration = 5;
+  float mean_current = 6;
 }
 
 message QueryTelemetryResponse {
