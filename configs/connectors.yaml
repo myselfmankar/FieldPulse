@@ -1,0 +1,29 @@
+connectors:
+  - name: "client-a-factory"
+    broker_url: "tcp://localhost:1883" # Using local-remote instance
+    client_id: "fieldpulse-connector-client-a"
+    # No credentials: remote broker uses allow_anonymous=true
+    topics:
+      - remote_pattern: "factory/line-1/+/data"
+        device_id_extractor: "segment:2"
+        internal_device_prefix: "client-a"
+        payload_mapping:
+          timestamp_field: "ts"
+          metrics:
+            temperature_c: "sensors.temp"
+            vibration_hz: "sensors.vib"
+            current_ma: "sensors.cur"
+
+  - name: "client-b-warehouse"
+    broker_url: "tcp://localhost:1883"
+    client_id: "fieldpulse-connector-client-b"
+    topics:
+      - remote_pattern: "warehouse/+/telemetry"
+        device_id_extractor: "segment:1"
+        internal_device_prefix: "client-b"
+        payload_mapping:
+          timestamp_field: "timestamp"
+          metrics:
+            temperature_c: "data.temperature"
+            vibration_hz: "data.vibration"
+            current_ma: "data.current"

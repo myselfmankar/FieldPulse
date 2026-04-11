@@ -1,19 +1,116 @@
-# FieldPulse IoT Concepts & Insights
+# FieldPulse - Outbound MQTT Connector: Bug Analysis & Concepts
+# File: .docs/concepts.txt
+# Date: 2026-04-11
+# ============================================================
 
-## Foreign Schema
-In industrial IoT, different sensors and external brokers often send data in varying formats. The FieldPulse platform expects a canonical "Internal Schema".
-- **Internal Schema:** The standard format (e.g., `temperature_c`, `vibration_hz`).
-- **Foreign Schema:** Any non-standard format from external sources.
-- **Outbound MQTT Connector:** its primary job is to bridge these formats using a mapping configuration.
 
-## Uptrace & OpenTelemetry
-Uptrace is the observability backend recommended in the assignment.
-- **OpenTelemetry:** A framework for generating and collecting telemetry data (traces, metrics, logs).
-- **Traces:** Used to follow a request's lifecycle across microservices (e.g., API Gateway -> Device Service).
-- **Mandatory Deliverable:** A screenshot of a successful end-to-end trace in Uptrace is required for the final submission.
+## BUG 1: Wrong Segment Index in Topic Extractor
+-----------------------------------------------
 
-## mTLS Implementation
-Devices connect to the internal broker via mTLS over port 8883.
-- **RootCA:** Managed by the Device Service.
-- **Certificates:** Generated programmatically by the Device Service and never stored (returned once to the device).
-- **Broker Config:** Must enforce `require_certificate true` and `use_identity_as_username true`.
+SYMPTOM:
+  Connector logs showed: "dropping message for unknown device: client-a-data"
+  Every message was being rejected by the gRPC device registry check.
+
+ROOT CAUSE:
+  The MQTT topic published by the simulator was:
+    factory/line-1/sim-device-000/data
+    [0]factory  [1]line-1  [2]sim-device-000  [3]data
+
+  The YAML config had:
+    device_id_extractor: "segment:3"
+
+  segment:3 = "data" (the literal word "data", not the device ID!)
+  After prefixing: "client-a" + "data" = "client-a-data" -> not registered -> dropped.
+
+FIX:
+  Changed to: device_id_extractor: "segment:2"
+  segment:2 = "sim-device-000" -> prefixed to "client-a-sim-device-000" -> valid registered device.
+
+CONCEPT LEARNED:
+  When using segment-based topic extraction, always count from 0 (zero-indexed).
+  Map out the full topic path before writing the extractor:
+    - 0: factory
+    - 1: line-1
+    - 2: {device_id}   <-- this is what we want
+    - 3: data
+
+
+## BUG 2: Sending Credentials to an Anonymous Broker
+----------------------------------------------------
+
+SYMPTOM:
+  Connector connected and immediately disconnected with EOF.
+  Mosquitto logs showed the client connecting but no subscription.
+
+ROOT CAUSE:
+  Mosquitto 2.x changed its authentication behaviour. With allow_anonymous=true,
+  the broker accepts clients with NO credentials. However, if a client sends a
+  username/password AND the broker has no password_file configured, Mosquitto 2.x
+  rejects the connection immediately (EOF) because it cannot verify the credentials.
+
+  Our config had:
+    username: "readonly_user"
+    password: "password123"
+  ...but the simulation broker had no password_file configured.
+
+FIX:
+  Removed username/password from the client-a-factory connector config.
+  The remote simulation broker is anonymous (allow_anonymous=true), so credentials
+  must not be sent.
+
+CONCEPT LEARNED:
+  Mosquitto 2.x is strict about authentication:
+    - allow_anonymous=true  + no credentials sent         = OK (connects)
+    - allow_anonymous=true  + credentials sent            = REJECTED (no password_file)
+    - allow_anonymous=false + valid credentials + pw_file = OK (connects)
+  Never send credentials to a broker that does not have a password_file configured,
+  even if allow_anonymous=true.
+
+
+## BUG 3: Paho MQTT Subscriptions Outside OnConnect = Infinite Reconnect Loop
+------------------------------------------------------------------------------
+
+SYMPTOM:
+  Connector entered an infinite disconnect/reconnect cycle.
+  Mosquitto logs showed: "Client fieldpulse-connector-client-a already connected,
+  closing old connection."
+
+ROOT CAUSE:
+  This is a classic Paho MQTT v3.x pitfall.
+
+  Our code registered subscriptions AFTER the initial Connect() call:
+    client.Connect()       <- connects and triggers OnConnect
+    client.Subscribe(...)  <- subscribes manually ONCE
+
+  When AutoReconnect fires (after a disconnect), Paho internally calls Connect()
+  again and triggers OnConnect. But the subscriptions from the manual block were
+  NOT re-registered (they were only called once at startup).
+
+  The Paho library then tries to re-send old subscription state from its internal
+  cache while our goroutine fires a new Subscribe() at the same time. This creates
+  duplicate SUBSCRIBE packets. Mosquitto treats this as a new session and closes
+  the old one, which triggers another reconnect -- an infinite loop.
+
+FIX:
+  Moved ALL subscriptions inside the OnConnect handler:
+
+    opts.SetOnConnectHandler(func(c mqtt.Client) {
+        log.Printf("[%s] connected", name)
+        c.Subscribe(topic, 1, handler) // re-subscribes on every connect/reconnect
+    })
+
+  Removed the manual subscribe block after Connect().
+
+CONCEPT LEARNED:
+  In Paho MQTT v3.x with CleanSession=true (default), subscriptions are NOT
+  persisted on the broker between sessions. You MUST re-subscribe inside the
+  OnConnect callback to ensure subscriptions survive reconnects.
+
+  The correct Paho subscription pattern:
+    1. Configure OnConnect handler with all Subscribe() calls inside it.
+    2. Call client.Connect() once.
+    3. Let Paho's AutoReconnect handle all future reconnects automatically.
+    4. Never call Subscribe() outside OnConnect if using AutoReconnect.
+
+  Calling Subscribe() both inside OnConnect AND manually after Connect() causes
+  race conditions that manifest as an infinite connect/disconnect loop on the broker.

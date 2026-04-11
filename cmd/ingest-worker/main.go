@@ -17,7 +17,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/myselfmankar/FieldPulse/internal/telemetry"
 	"github.com/redis/go-redis/v9"
+	"github.com/uptrace/uptrace-go/uptrace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
+
+var tracer = otel.Tracer("ingest-worker")
 
 func main() {
 	// 1. Configuration
@@ -32,6 +39,17 @@ func main() {
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
 		redisURL = "localhost:6379"
+	}
+
+	// 2. Initialize OTEL (Requirement Page 1)
+	upDSN := os.Getenv("UPTRACE_DSN")
+	if upDSN != "" {
+		uptrace.ConfigureOpentelemetry(
+			uptrace.WithDSN(upDSN),
+			uptrace.WithServiceName("ingest-worker"),
+			uptrace.WithServiceVersion("1.0.0"),
+		)
+		defer uptrace.Shutdown(context.Background())
 	}
 
 	// 2. Initialize Clients
@@ -84,6 +102,21 @@ func main() {
 			return
 		}
 		rd.DeviceID = deviceID
+
+		// -- REQUIREMENT: TRACING (ROOT CAUSE FIX) --
+		// Extract context from payload if it exists (from Connector)
+		spanCtx := ctx
+		if rd.TraceContext != nil {
+			propagator := otel.GetTextMapPropagator()
+			spanCtx = propagator.Extract(ctx, propagation.MapCarrier(rd.TraceContext))
+		}
+
+		// Start span for ingestion processing
+		// We use Links to connect back to the Connector's Publish span
+		_, span := tracer.Start(spanCtx, "Ingest Reading", trace.WithAttributes(
+			attribute.String("device_id", deviceID),
+		), trace.WithSpanKind(trace.SpanKindConsumer))
+		defer span.End()
 
 		// -- REQUIREMENT: VALIDATION --
 		if rd.Timestamp.After(time.Now().Add(5 * time.Second)) {

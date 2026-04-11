@@ -51,8 +51,9 @@ services:
     container_name: fieldpulse-mosquitto-remote
     ports:
       - "1883:1883"
+    volumes:
+      - ./configs/mosquitto-remote.conf:/mosquitto/config/mosquitto.conf
     command: mosquitto -c /mosquitto/config/mosquitto.conf
-    # Note: Using default config (port 1883 no auth) for the remote simulation broker
 
 volumes:
   mosquitto_data:

@@ -11,6 +11,7 @@ type Reading struct {
 	Temperature   float64   `json:"temperature_c"`
 	Vibration     float64   `json:"vibration_hz"`
 	CurrentMa     float64   `json:"current_ma"`
+	TraceContext  map[string]string `json:"_trace_context"`
 }
 
 // Aggregate represents bucketed calculations (min/max/avg)
