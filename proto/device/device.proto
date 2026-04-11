@@ -9,6 +9,8 @@ service DeviceService {
   rpc GetDevice(GetDeviceRequest) returns (Device);
   rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
   rpc UpdateDeviceStatus(UpdateDeviceStatusRequest) returns (Device);
+  rpc SetThreshold(SetThresholdRequest) returns (Threshold);
+  rpc GetThreshold(GetThresholdRequest) returns (Threshold);
 }
 
 message CreateDeviceRequest {
@@ -51,4 +53,22 @@ message ListDevicesResponse {
 message UpdateDeviceStatusRequest {
   string device_id = 1;
   string status = 2;
+}
+
+message Threshold {
+  string device_id = 1;
+  float temp_max = 2;
+  float vibe_max = 3;
+  float current_max = 4;
+}
+
+message SetThresholdRequest {
+  string device_id = 1;
+  float temp_max = 2;
+  float vibe_max = 3;
+  float current_max = 4;
+}
+
+message GetThresholdRequest {
+  string device_id = 1;
 }

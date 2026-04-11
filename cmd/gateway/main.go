@@ -17,11 +17,13 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"github.com/redis/go-redis/v9"
 )
 
 type Gateway struct {
 	deviceClient    devicepb.DeviceServiceClient
 	telemetryClient telemetrypb.TelemetryServiceClient
+	rdb             *redis.Client
 }
 
 func main() {
@@ -41,6 +43,12 @@ func main() {
 		telemetrySvcAddr = "127.0.0.1:50052"
 	}
 
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "127.0.0.1:6379"
+	}
+	rdb := redis.NewClient(&redis.Options{Addr: redisURL})
+
 	dConn, err := grpc.Dial(deviceSvcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("did not connect device svc: %v", err)
@@ -56,6 +64,7 @@ func main() {
 	gw := &Gateway{
 		deviceClient:    devicepb.NewDeviceServiceClient(dConn),
 		telemetryClient: telemetrypb.NewTelemetryServiceClient(tConn),
+		rdb:             rdb,
 	}
 
 	// 2. Initialize GoFiber
@@ -73,6 +82,10 @@ func main() {
 
 	v1.Get("/telemetry/:id", gw.HandleQueryTelemetry)
 	v1.Get("/telemetry/:id/latest", gw.HandleGetLatestTelemetry)
+
+	v1.Post("/devices/:id/thresholds", gw.HandleSetThresholds)
+	v1.Get("/devices/:id/thresholds", gw.HandleGetThresholds)
+	v1.Post("/devices/:id/silence", gw.HandleSetSilence)
 
 	// 4. Start Server
 	log.Fatal(app.Listen(":3000"))
@@ -148,6 +161,60 @@ func (gw *Gateway) HandleGetLatestTelemetry(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(resp)
+}
+
+func (gw *Gateway) HandleSetThresholds(c *fiber.Ctx) error {
+	id := c.Params("id")
+	var req devicepb.SetThresholdRequest
+	if err := protojson.Unmarshal(c.Body(), &req); err != nil {
+		return fiber.NewError(http.StatusBadRequest, "Invalid JSON body")
+	}
+	req.DeviceId = id
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	resp, err := gw.deviceClient.SetThreshold(ctx, &req)
+	if err != nil {
+		return mapgRPCErrorToFiber(err)
+	}
+
+	return c.JSON(resp)
+}
+
+func (gw *Gateway) HandleGetThresholds(c *fiber.Ctx) error {
+	id := c.Params("id")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	resp, err := gw.deviceClient.GetThreshold(ctx, &devicepb.GetThresholdRequest{DeviceId: id})
+	if err != nil {
+		return mapgRPCErrorToFiber(err)
+	}
+
+	return c.JSON(resp)
+}
+
+func (gw *Gateway) HandleSetSilence(c *fiber.Ctx) error {
+	id := c.Params("id")
+	durationStr := c.Query("duration", "10m")
+	duration, err := time.ParseDuration(durationStr)
+	if err != nil {
+		return fiber.NewError(http.StatusBadRequest, "Invalid duration format (e.g. 10m, 1h)")
+	}
+
+	// REQUIREMENT: Manual Silence via Redis (Page 2)
+	err = gw.rdb.Set(context.Background(), "silence:"+id, "1", duration).Err()
+	if err != nil {
+		return fiber.NewError(http.StatusInternalServerError, "Failed to set silence in cache")
+	}
+
+	return c.JSON(fiber.Map{
+		"message":  "Device alerts silenced",
+		"id":       id,
+		"duration": duration.String(),
+	})
 }
 
 // Technical Requirement: Error Code Mapping (gRPC -> HTTP)

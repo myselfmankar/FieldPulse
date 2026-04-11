@@ -108,3 +108,45 @@ func (s *Service) ListDevices(ctx context.Context, req *pb.ListDevicesRequest) (
 
 	return &pb.ListDevicesResponse{Devices: pbDevices}, nil
 }
+
+func (s *Service) UpdateDeviceStatus(ctx context.Context, req *pb.UpdateDeviceStatusRequest) (*pb.Device, error) {
+	if err := s.repo.UpdateStatus(ctx, req.DeviceId, req.Status); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to update status: %v", err)
+	}
+
+	return s.GetDevice(ctx, &pb.GetDeviceRequest{DeviceId: req.DeviceId})
+}
+
+func (s *Service) SetThreshold(ctx context.Context, req *pb.SetThresholdRequest) (*pb.Threshold, error) {
+	t := &Thresholds{
+		DeviceID:   req.DeviceId,
+		TempMax:    float64(req.TempMax),
+		VibeMax:    float64(req.VibeMax),
+		CurrentMax: float64(req.CurrentMax),
+	}
+
+	if err := s.repo.UpdateThresholds(ctx, t); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to set thresholds: %v", err)
+	}
+
+	return &pb.Threshold{
+		DeviceId:   req.DeviceId,
+		TempMax:    req.TempMax,
+		VibeMax:    req.VibeMax,
+		CurrentMax: req.CurrentMax,
+	}, nil
+}
+
+func (s *Service) GetThreshold(ctx context.Context, req *pb.GetThresholdRequest) (*pb.Threshold, error) {
+	t, err := s.repo.GetThresholds(ctx, req.DeviceId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get thresholds: %v", err)
+	}
+
+	return &pb.Threshold{
+		DeviceId:   t.DeviceID,
+		TempMax:    float32(t.TempMax),
+		VibeMax:    float32(t.VibeMax),
+		CurrentMax: float32(t.CurrentMax),
+	}, nil
+}

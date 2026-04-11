@@ -83,3 +83,50 @@ func (r *Repository) ListDevices(ctx context.Context, floor, status string) ([]*
 
 	return devices, nil
 }
+
+// UpdateThresholds updates or inserts alert limits for a device
+// Requirement: Dynamic threshold management (Page 2)
+func (r *Repository) UpdateThresholds(ctx context.Context, t *Thresholds) error {
+	const query = `
+		INSERT INTO device_thresholds (device_id, temp_max, vibe_max, current_max, updated_at)
+		VALUES ($1, $2, $3, $4, NOW())
+		ON CONFLICT (device_id) DO UPDATE SET
+			temp_max = EXCLUDED.temp_max,
+			vibe_max = EXCLUDED.vibe_max,
+			current_max = EXCLUDED.current_max,
+			updated_at = NOW()
+	`
+	_, err := r.db.Exec(ctx, query, t.DeviceID, t.TempMax, t.VibeMax, t.CurrentMax)
+	if err != nil {
+		return fmt.Errorf("failed to update thresholds: %w", err)
+	}
+	return nil
+}
+
+// GetThresholds retrieves alert limits for a device
+func (r *Repository) GetThresholds(ctx context.Context, id string) (*Thresholds, error) {
+	const query = `
+		SELECT device_id, temp_max, vibe_max, current_max
+		FROM device_thresholds WHERE device_id = $1
+	`
+	var t Thresholds
+	err := r.db.QueryRow(ctx, query, id).Scan(&t.DeviceID, &t.TempMax, &t.VibeMax, &t.CurrentMax)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			// Return default thresholds (unlimited) if none set
+			return &Thresholds{DeviceID: id, TempMax: 999, VibeMax: 999, CurrentMax: 9999}, nil
+		}
+		return nil, fmt.Errorf("failed to get thresholds: %w", err)
+	}
+	return &t, nil
+}
+
+// UpdateStatus updates a device's status (active, silent, degraded)
+func (r *Repository) UpdateStatus(ctx context.Context, id string, status string) error {
+	const query = `UPDATE devices SET status = $1, updated_at = NOW() WHERE device_id = $2`
+	_, err := r.db.Exec(ctx, query, status, id)
+	if err != nil {
+		return fmt.Errorf("failed to update status: %w", err)
+	}
+	return nil
+}
