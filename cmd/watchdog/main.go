@@ -10,11 +10,23 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	devicepb "github.com/myselfmankar/FieldPulse/proto/device"
+	"github.com/uptrace/uptrace-go/uptrace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
+	// 0. Observability (Uptrace/OpenTelemetry)
+	upDSN := os.Getenv("UPTRACE_DSN")
+	if upDSN != "" {
+		uptrace.ConfigureOpentelemetry(
+			uptrace.WithDSN(upDSN),
+			uptrace.WithServiceName("status-watchdog"),
+			uptrace.WithServiceVersion("1.0.0"),
+		)
+		defer uptrace.Shutdown(context.Background())
+	}
+
 	// 1. Config
 	dbURL := os.Getenv("TELEMETRY_DB_URL")
 	if dbURL == "" {

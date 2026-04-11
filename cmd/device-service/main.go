@@ -12,11 +12,23 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/myselfmankar/FieldPulse/internal/device"
 	pb "github.com/myselfmankar/FieldPulse/proto/device"
+	"github.com/uptrace/uptrace-go/uptrace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
 
 func main() {
+	// 0. Observability (Uptrace/OpenTelemetry)
+	upDSN := os.Getenv("UPTRACE_DSN")
+	if upDSN != "" {
+		uptrace.ConfigureOpentelemetry(
+			uptrace.WithDSN(upDSN),
+			uptrace.WithServiceName("device-service"),
+			uptrace.WithServiceVersion("1.0.0"),
+		)
+		defer uptrace.Shutdown(context.Background())
+	}
+
 	// 1. Load Configuration
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {

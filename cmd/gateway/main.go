@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"github.com/redis/go-redis/v9"
+	"github.com/uptrace/uptrace-go/uptrace"
 )
 
 type Gateway struct {
@@ -27,6 +28,17 @@ type Gateway struct {
 }
 
 func main() {
+	// 0. Observability (Uptrace/OpenTelemetry)
+	upDSN := os.Getenv("UPTRACE_DSN")
+	if upDSN != "" {
+		uptrace.ConfigureOpentelemetry(
+			uptrace.WithDSN(upDSN),
+			uptrace.WithServiceName("api-gateway"),
+			uptrace.WithServiceVersion("1.0.0"),
+		)
+		defer uptrace.Shutdown(context.Background())
+	}
+
 	// 1. Connect to Backend Services (gRPC)
 	brokerURL := os.Getenv("INTERNAL_BROKER_URL")
 	if brokerURL == "" {

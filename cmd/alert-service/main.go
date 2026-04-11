@@ -18,9 +18,21 @@ import (
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"github.com/uptrace/uptrace-go/uptrace"
 )
 
 func main() {
+	// 0. Observability (Uptrace/OpenTelemetry)
+	upDSN := os.Getenv("UPTRACE_DSN")
+	if upDSN != "" {
+		uptrace.ConfigureOpentelemetry(
+			uptrace.WithDSN(upDSN),
+			uptrace.WithServiceName("alert-service"),
+			uptrace.WithServiceVersion("1.0.0"),
+		)
+		defer uptrace.Shutdown(context.Background())
+	}
+
 	// 1. Config
 	mqttBroker := os.Getenv("MQTT_BROKER_URL")
 	if mqttBroker == "" {
