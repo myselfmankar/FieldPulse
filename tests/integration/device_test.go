@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -17,7 +18,7 @@ func TestDeviceFlow_Integration(t *testing.T) {
 	// 1. Setup Connection (Requirement: No Mocking)
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://postgres:postgres@localhost:5432/device_registry"
+		dbURL = "postgres://postgres:password@127.0.0.1:5432/device_registry?sslmode=disable"
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -29,10 +30,10 @@ func TestDeviceFlow_Integration(t *testing.T) {
 	}
 	defer dbPool.Close()
 
-	// 2. Initialize Service Stack
-	// Paths relative to 'tests/integration' package directory
-	caCertPath := "../../certs/ca.crt"
-	caKeyPath := "../../certs/ca.key"
+	// 2. Initialize Service Stack with Robust Path Resolution
+	root := findProjectRoot(t)
+	caCertPath := filepath.Join(root, "certs", "ca.crt")
+	caKeyPath := filepath.Join(root, "certs", "ca.key")
 	
 	repo := device.NewRepository(dbPool)
 	svc, err := device.NewService(repo, caCertPath, caKeyPath, "mqtts://localhost:8883")
@@ -65,4 +66,21 @@ func TestDeviceFlow_Integration(t *testing.T) {
 	_, err = svc.CreateDevice(ctx, req)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists")
+}
+
+// findProjectRoot looks for go.mod to find the base directory of the project
+func findProjectRoot(t *testing.T) string {
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	for {
+		if _, err := os.Stat(filepath.Join(wd, "go.mod")); err == nil {
+			return wd
+		}
+		parent := filepath.Dir(wd)
+		if parent == wd {
+			t.Fatal("could not find project root (go.mod not found)")
+		}
+		wd = parent
+	}
 }

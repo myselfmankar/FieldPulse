@@ -20,12 +20,12 @@ func main() {
 	// 1. Load Configuration
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://postgres:postgres@localhost:5432/device_registry"
+		dbURL = "postgres://postgres:password@127.0.0.1:5432/device_registry?sslmode=disable"
 	}
 
 	brokerURL := os.Getenv("INTERNAL_BROKER_URL")
 	if brokerURL == "" {
-		brokerURL = "mqtts://localhost:8883"
+		brokerURL = "mqtts://127.0.0.1:8883"
 	}
 
 	caCertPath := "certs/ca.crt"

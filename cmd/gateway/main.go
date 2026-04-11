@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 type Gateway struct {
@@ -22,9 +23,14 @@ type Gateway struct {
 
 func main() {
 	// 1. Connect to Backend Services (gRPC)
+	brokerURL := os.Getenv("INTERNAL_BROKER_URL")
+	if brokerURL == "" {
+		brokerURL = "mqtts://127.0.0.1:8883"
+	}
+
 	deviceSvcAddr := os.Getenv("DEVICE_SERVICE_ADDR")
 	if deviceSvcAddr == "" {
-		deviceSvcAddr = "localhost:50051"
+		deviceSvcAddr = "127.0.0.1:50051"
 	}
 
 	conn, err := grpc.Dial(deviceSvcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -56,8 +62,9 @@ func main() {
 
 func (gw *Gateway) HandleCreateDevice(c *fiber.Ctx) error {
 	var req pb.CreateDeviceRequest
-	if err := c.BodyParser(&req); err != nil {
-		return fiber.NewError(http.StatusBadRequest, "Invalid JSON body")
+	if err := protojson.Unmarshal(c.Body(), &req); err != nil {
+		log.Printf("Protobuf JSON unmarshal error: %v | Raw Body: %s", err, string(c.Body()))
+		return fiber.NewError(http.StatusBadRequest, "Invalid JSON body: "+err.Error())
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
