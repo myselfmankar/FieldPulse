@@ -12,16 +12,25 @@ Write-Host ""
 # --- Step 1: Infrastructure Check ---
 Write-Host "[1/6] Checking Docker infrastructure..." -ForegroundColor Yellow
 $containers = docker ps --format "{{.Names}}" 2>&1
-$required = @("fieldpulse-postgres", "fieldpulse-timescaledb", "fieldpulse-redis", "fieldpulse-mosquitto", "fieldpulse-mosquitto-remote")
+$required = @("fieldpulse-postgres", "fieldpulse-timescaledb", "fieldpulse-redis", "fieldpulse-mosquitto", "fieldpulse-mosquitto-remote", "fieldpulse-uptrace", "fieldpulse-clickhouse", "uptrace-postgres")
 $missing = $required | Where-Object { $containers -notcontains $_ }
 
 if ($missing.Count -gt 0) {
     Write-Host "  Starting missing containers: $($missing -join ', ')" -ForegroundColor Yellow
     docker compose -f "$root\docker-compose.yml" up -d
-    Write-Host "  Waiting 5s for containers to be ready..." -ForegroundColor Gray
-    Start-Sleep 5
+    Write-Host "  Waiting 10s for Uptrace & ClickHouse initialization..." -ForegroundColor Gray
+    Start-Sleep 10
 } else {
     Write-Host "  All Docker containers already running." -ForegroundColor Green
+}
+
+# --- Step 1.5: Observability Config ---
+if ([string]::IsNullOrEmpty($env:UPTRACE_DSN)) {
+    # Default Local DSN for self-hosted Uptrace (Project 1)
+    $env:UPTRACE_DSN = "http://uptrace@localhost:14317/1"
+    Write-Host "  Using Local Uptrace Dashboard: http://localhost:14318" -ForegroundColor Cyan
+} else {
+    Write-Host "  Using Cloud Uptrace DSN from environment." -ForegroundColor Gray
 }
 
 Write-Host ""

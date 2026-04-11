@@ -1,0 +1,18 @@
+# Uptrace Server Configuration
+# https://uptrace.dev/guide/server-config.html
+
+pg:
+  addr: "uptrace-postgres:5432"
+  user: "postgres"
+  password: "password"
+  database: "uptrace"
+  sslmode: "disable"
+
+ch:
+  addr: "clickhouse:9000"
+  user: "default"
+  password: ""
+  database: "uptrace"
+
+uptrace:
+  dsn: "http://uptrace@localhost:14317/1"

@@ -55,6 +55,53 @@ services:
       - ./configs/mosquitto-remote.conf:/mosquitto/config/mosquitto.conf
     command: mosquitto -c /mosquitto/config/mosquitto.conf
 
+  # Observability Stack (Local Uptrace)
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.3-alpine
+    container_name: fieldpulse-clickhouse
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "-q", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  uptrace-postgres:
+    image: postgres:15-alpine
+    container_name: uptrace-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=uptrace
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  uptrace:
+    image: uptrace/uptrace:1.7.0
+    container_name: fieldpulse-uptrace
+    restart: on-failure
+    environment:
+      - UPTRACE_POSTGRES_DSN=postgres://postgres:password@uptrace-postgres:5432/uptrace?sslmode=disable
+      - UPTRACE_CLICKHOUSE_DSN=clickhouse://clickhouse:9000/uptrace
+    volumes:
+      - ./configs/uptrace.yml:/etc/uptrace/uptrace.yml
+    ports:
+      - "14317:14317" # OTLP gRPC
+      - "14318:14318" # HTTP UI
+    depends_on:
+      uptrace-postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
 volumes:
   mosquitto_data:
   mosquitto_log:
