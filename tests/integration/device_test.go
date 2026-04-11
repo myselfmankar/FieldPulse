@@ -30,9 +30,9 @@ func TestDeviceFlow_Integration(t *testing.T) {
 	defer dbPool.Close()
 
 	// 2. Initialize Service Stack
-	// Use relative paths that work from the workspace root
-	caCertPath := "certs/ca.crt"
-	caKeyPath := "certs/ca.key"
+	// Paths relative to 'tests/integration' package directory
+	caCertPath := "../../certs/ca.crt"
+	caKeyPath := "../../certs/ca.key"
 	
 	repo := device.NewRepository(dbPool)
 	svc, err := device.NewService(repo, caCertPath, caKeyPath, "mqtts://localhost:8883")
