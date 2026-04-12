@@ -1,7 +1,9 @@
 services:
+  # --- INFRASTRUCTURE ---
   postgres:
     image: postgres:15-alpine
     container_name: fieldpulse-postgres
+    env_file: .env
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
@@ -15,10 +17,13 @@ services:
       retries: 5
     volumes:
       - ./migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/01-init.sql
+    networks:
+      - fieldpulse-net
 
   timescaledb:
     image: timescale/timescaledb:latest-pg15
     container_name: fieldpulse-timescaledb
+    env_file: .env
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
@@ -32,12 +37,16 @@ services:
       retries: 5
     volumes:
       - ./migrations/002_telemetry_schema.sql:/docker-entrypoint-initdb.d/01-telemetry.sql
+    networks:
+      - fieldpulse-net
 
   redis:
     image: redis:7-alpine
     container_name: fieldpulse-redis
     ports:
       - "6379:6379"
+    networks:
+      - fieldpulse-net
 
   mosquitto:
     image: eclipse-mosquitto:2.0
@@ -47,17 +56,117 @@ services:
     volumes:
       - ./configs/mosquitto.conf:/mosquitto/config/mosquitto.conf
       - ./certs:/mosquitto/config/certs
-      - mosquitto_data:/mosquitto/data
-      - mosquitto_log:/mosquitto/log
+    networks:
+      - fieldpulse-net
 
-  mosquitto-remote:
-    image: eclipse-mosquitto:2.0
-    container_name: fieldpulse-mosquitto-remote
+  # --- GO SERVICES ---
+  device-service:
+    build: .
+    command: ./device-service
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - fieldpulse-net
+
+  telemetry-service:
+    build: .
+    command: ./telemetry-service
+    env_file: .env
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    networks:
+      - fieldpulse-net
+
+  gateway:
+    build: .
+    command: ./gateway
+    env_file: .env
     ports:
-      - "1883:1883"
+      - "3000:3000"
+    depends_on:
+      - device-service
+      - telemetry-service
+    networks:
+      - fieldpulse-net
+
+  ingest-worker:
+    build: .
+    command: ./ingest-worker
+    env_file: .env
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    networks:
+      - fieldpulse-net
+
+  alert-service:
+    build: .
+    command: ./alert-service
+    env_file: .env
     volumes:
-      - ./configs/mosquitto-remote.conf:/mosquitto/config/mosquitto.conf
-    command: mosquitto -c /mosquitto/config/mosquitto.conf
+      - ./certs:/app/certs
+    depends_on:
+      - redis
+      - mosquitto
+    networks:
+      - fieldpulse-net
+
+  connector:
+    build: .
+    command: ./connector
+    env_file: .env
+    volumes:
+      - ./certs:/app/certs
+    depends_on:
+      - mosquitto
+    networks:
+      - fieldpulse-net
+
+  watchdog:
+    build: .
+    command: ./watchdog
+    env_file: .env
+    volumes:
+      - ./certs:/app/certs
+    depends_on:
+      - device-service
+      - mosquitto
+    networks:
+      - fieldpulse-net
+
+  # --- AUTOMATION & SIMULATION ---
+  init-provisioner:
+    build: .
+    command: ./register
+    env_file: .env
+    volumes:
+      - ./certs:/app/certs
+    depends_on:
+      gateway:
+        condition: service_started
+    networks:
+      - fieldpulse-net
+
+  simulator:
+    build: .
+    command: ./simulator -n 3 --broker-url ssl://mosquitto:8883
+    env_file: .env
+    volumes:
+      - ./certs:/app/certs
+    depends_on:
+      init-provisioner:
+        condition: service_completed_successfully
+    networks:
+      - fieldpulse-net
+
+networks:
+  fieldpulse-net:
+    driver: bridge
 
 volumes:
   mosquitto_data:

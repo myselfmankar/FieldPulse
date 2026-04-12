@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type RegisterRequest struct {
@@ -33,28 +33,58 @@ func main() {
 		{DeviceID: "sim-device-003", DeviceType: "current_sensor", Floor: "Floor-3", FirmwareVer: "1.0.1"},
 	}
 
-	gatewayURL := "http://localhost:3000/v1/devices"
+	gatewayURL := os.Getenv("GATEWAY_URL")
+	if gatewayURL == "" {
+		gatewayURL = "http://localhost:3000/v1/devices"
+	}
+
+	certsDir := os.Getenv("CERTS_DIR")
+	if certsDir == "" {
+		certsDir = "certs"
+	}
+
+	apiKey := os.Getenv("GATEWAY_API_KEY")
+	if apiKey == "" {
+		apiKey = "fieldpulse-secret-2026"
+	}
 
 	for _, dev := range devices {
 		fmt.Printf("Registering %s...\n", dev.DeviceID)
-		
-		payload, _ := json.Marshal(dev)
-		resp, err := http.Post(gatewayURL, "application/json", bytes.NewBuffer(payload))
-		if err != nil {
-			log.Printf("Failed to register %s: %v", dev.DeviceID, err)
+
+		var resp *http.Response
+		var err error
+		success := false
+
+		// RETRY LOOP: Handle temporary DNS or service unavailability
+		for attempt := 1; attempt <= 5; attempt++ {
+			payload, _ := json.Marshal(dev)
+			req, _ := http.NewRequest("POST", gatewayURL, bytes.NewBuffer(payload))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-API-Key", apiKey)
+
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err = client.Do(req)
+
+			if err == nil && (resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusConflict) {
+				success = true
+				break
+			}
+
+			if resp != nil {
+				resp.Body.Close()
+			}
+			log.Printf("  [Attempt %d/5] Backend not ready (%v). Retrying in 5s...", attempt, err)
+			time.Sleep(5 * time.Second)
+		}
+
+		if !success {
+			log.Printf("❌ Failed to register %s after 5 attempts. Skipping.", dev.DeviceID)
 			continue
 		}
 		defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusConflict {
-			body, _ := io.ReadAll(resp.Body)
-			log.Printf("Failed to register %s. Status: %d, Body: %s", dev.DeviceID, resp.StatusCode, string(body))
-			continue
-		}
-
 		if resp.StatusCode == http.StatusConflict {
-			fmt.Printf("Device %s already exists. Skipping certificate save.\n", dev.DeviceID)
-			continue
+			fmt.Printf("Device %s already exists. Using existing record.\n", dev.DeviceID)
 		}
 
 		var regResp RegisterResponse
@@ -64,7 +94,7 @@ func main() {
 		}
 
 		// Save certificates
-		basePath := filepath.Join("certs", "devices", dev.DeviceID)
+		basePath := filepath.Join(certsDir, "devices", dev.DeviceID)
 		if err := os.MkdirAll(basePath, 0755); err != nil {
 			log.Printf("Failed to create dir for %s: %v", dev.DeviceID, err)
 			continue

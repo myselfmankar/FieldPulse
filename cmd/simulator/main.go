@@ -41,13 +41,23 @@ func main() {
 		defer uptrace.Shutdown(context.Background())
 	}
 
-	brokerURL := flag.String("broker-url", "tls://localhost:8883", "MQTT Broker URL")
+	// 1. Config & Environment Prioritization
+	mqttBroker := os.Getenv("MQTT_BROKER_URL")
+	if mqttBroker == "" {
+		mqttBroker = "tls://localhost:8883"
+	}
+	
+	// Flags allow overrides, but defaults now come from ENV
+	brokerUrlFlag := flag.String("broker-url", mqttBroker, "MQTT Broker URL")
 	certFile := flag.String("tls-cert", "certs/client.crt", "Path to client certificate")
 	keyFile := flag.String("tls-key", "certs/client.key", "Path to client key")
 	caFile := flag.String("tls-ca", "certs/ca.crt", "Path to CA certificate")
-	modeRemote := flag.Bool("mode-remote", false, "Use remote payload schema")
+	modeRemote := flag.Bool("mode-remote", false, "Use remote payload schema (un-nested)")
 	numDevices := flag.Int("n", 3, "Number of devices to simulate")
 	flag.Parse()
+
+	// Use the final flag value (which defaults to env)
+	finalBrokerURL := *brokerUrlFlag
 
 	var tlsConfig *tls.Config
 	if !*modeRemote {

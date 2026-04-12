@@ -28,6 +28,8 @@ message QueryTelemetryRequest {
   google.protobuf.Timestamp start_time = 2;
   google.protobuf.Timestamp end_time = 3;
   string resolution = 4; // 1m, 5m, 1h
+  int32 limit = 5;       // REQUIRED: Pagination support
+  int32 offset = 6;      // REQUIRED: Pagination support
 }
 
 message TelemetryAggregate {

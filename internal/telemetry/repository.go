@@ -51,7 +51,7 @@ func (r *Repository) GetLatestReading(ctx context.Context, deviceID string) (*Re
 
 // QueryAggregates returns time-bucketed stats (1m, 5m, 1h)
 // Requirement (Page 11): No ORM. Pure SQL.
-func (r *Repository) QueryAggregates(ctx context.Context, deviceID string, resolution string, from, to time.Time) ([]*Aggregate, error) {
+func (r *Repository) QueryAggregates(ctx context.Context, deviceID string, resolution string, from, to time.Time, limit, offset int32) ([]*Aggregate, error) {
 	var bucketInterval string
 	switch resolution {
 	case "1m":
@@ -59,12 +59,12 @@ func (r *Repository) QueryAggregates(ctx context.Context, deviceID string, resol
 	case "5m":
 		bucketInterval = "5 minutes"
 	case "1h":
-		// We could query the continuous aggregate here for extreme performance,
-		// but for consistency we'll use time_bucket on the main table for now.
 		bucketInterval = "1 hour"
 	default:
 		return nil, fmt.Errorf("unsupported resolution: %s", resolution)
 	}
+
+	if limit <= 0 { limit = 100 } // Safety default
 
 	query := fmt.Sprintf(`
 		SELECT 
@@ -78,9 +78,10 @@ func (r *Repository) QueryAggregates(ctx context.Context, deviceID string, resol
 		WHERE device_id = $1 AND "time" >= $2 AND "time" <= $3
 		GROUP BY bucket
 		ORDER BY bucket ASC
+		LIMIT $4 OFFSET $5
 	`, bucketInterval)
 
-	rows, err := r.db.Query(ctx, query, deviceID, from, to)
+	rows, err := r.db.Query(ctx, query, deviceID, from, to, limit, offset)
 	if err != nil {
 		return nil, err
 	}

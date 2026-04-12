@@ -148,6 +148,8 @@ type QueryTelemetryRequest struct {
 	StartTime     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
 	EndTime       *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`
 	Resolution    string                 `protobuf:"bytes,4,opt,name=resolution,proto3" json:"resolution,omitempty"` // 1m, 5m, 1h
+	Limit         int32                  `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`
+	Offset        int32                  `protobuf:"varint,6,opt,name=offset,proto3" json:"offset,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -208,6 +210,20 @@ func (x *QueryTelemetryRequest) GetResolution() string {
 		return x.Resolution
 	}
 	return ""
+}
+
+func (x *QueryTelemetryRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *QueryTelemetryRequest) GetOffset() int32 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
 }
 
 type TelemetryAggregate struct {

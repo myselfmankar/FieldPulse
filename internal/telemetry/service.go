@@ -38,7 +38,7 @@ func (s *Service) QueryTelemetry(ctx context.Context, req *pb.QueryTelemetryRequ
 	start := req.StartTime.AsTime()
 	end := req.EndTime.AsTime()
 
-	aggs, err := s.repo.QueryAggregates(ctx, req.DeviceId, req.Resolution, start, end)
+	aggs, err := s.repo.QueryAggregates(ctx, req.DeviceId, req.Resolution, start, end, req.Limit, req.Offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query aggregates: %w", err)
 	}

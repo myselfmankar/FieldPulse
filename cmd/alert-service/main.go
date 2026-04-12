@@ -165,8 +165,11 @@ func evaluate(ctx context.Context, id, metric string, val, limit float32, rdb *r
 
 	// REQUIREMENT: Deduplication (Page 3)
 	// Only alert if we haven't already alerted for this specific breach in the last 5 minutes
-	isAlreadyAlerted, _ := rdb.SetNX(ctx, fmt.Sprintf("alert_active:%s:%s", id, metric), "1", 5*time.Minute).Result()
-	if !isAlreadyAlerted {
+	isSet, _ := rdb.SetArgs(ctx, fmt.Sprintf("alert_active:%s:%s", id, metric), "1", redis.SetArgs{
+		Mode: "NX",
+		TTL:  5 * time.Minute,
+	}).Result()
+	if isSet != "OK" {
 		return
 	}
 

@@ -86,7 +86,8 @@ func main() {
 }
 
 func checkDeviceHealth(ctx context.Context, db *pgxpool.Pool, client devicepb.DeviceServiceClient, mq mqtt.Client) {
-	_, span := tracer.Start(ctx, "Health Check Cycle", trace.WithSpanKind(trace.SpanKindInternal))
+	// Create a fresh span for each cycle to ensure visibility.
+	ctx, span := tracer.Start(ctx, "Health Check Cycle", trace.WithSpanKind(trace.SpanKindInternal))
 	defer span.End()
 
 	const query = `

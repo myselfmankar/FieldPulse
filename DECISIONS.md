@@ -35,9 +35,33 @@ This document justifies the architectural choices made for the FieldPulse IoT Pl
 
 ## 3. Communication Protocols
 
-### Why gRPC for Internal Service Talk?
-**Decision**: All service-to-service communication is via gRPC/Protobuf.
+### "Proto-First" Architecture
+**Decision**: Protobuf is the source of truth for all internal and external data structures.
 **Reasoning**:
-- **Type Safety**: Protobuf acts as a "single source of truth." If the Device Service changes its response, the API Gateway will fail to compile, preventing runtime bugs.
-- **Performance**: Binary serialization is faster and smaller than JSON over HTTP/1.1.
-- **Multiplexing**: Uses HTTP/2, allowing multiple requests over a single connection.
+- **Modern gRPC Standard**: As per company feedback, the system prioritizes gRPC for robustness and efficiency. 
+- **Type Safety**: Using Protobuf generation prevents drift between the API Gateway and backend services.
+- **Binary Efficiency**:Internal gRPC calls use HTTP/2 multiplexing and binary serialization, significantly reducing latency compared to REST.
+
+### Hybrid API Gateway (JSON Bridge)
+**Decision**: The Gateway supports both modern Protobuf-backed logic and a resilient JSON fallback.
+**Reasoning**:
+- **Interoperability**: While the internal core is pure gRPC, the external Gateway provides a bridge for legacy systems or simple `curl` testing that may not have gRPC client capabilities.
+- **Resiliency**: The "Robust Parsing" layer cleans up manual shell inputs (like unquoted JSON keys) to prevent trivial failures during manual testing cycles, while still mapping accurately to the official Protobuf fields.
+
+## 4. Business Logic & Timing (5-10-15 Distribution)
+
+### Requirement Alignment
+**Decision**: Explicitly implemented the 5m/10m/15m timing distribution from the assignment specifications.
+**Reasoning**:
+- **5 Minute Silencing (Alert Service)**: Optimized for noisy sensor environments. We store an "active alert" state in Redis with a 5-minute TTL to prevent "alert fatigue" without losing critical data.
+- **10 Minute Silence (Gateway Default)**: The manual silence command defaults to 10 minutes, providing a standard maintenance window for operators as suggested by project norms.
+- **15 Minute Watchdog (Reliability)**: Devices are marked "SILENT" only after 15 minutes of inactivity. This account for network jitter or transient outages while still providing a strict reliability guarantee via immediate MQTT event publishing (`device/silent/{id}`).
+
+## 5. Observability
+
+### Choice: OpenTelemetry + Uptrace
+**Decision**: Full distributed tracing instrumentation across all services.
+**Reasoning**:
+- **End-to-End Visibility**: In a distributed event-driven system (MQTT -> Connector -> Worker -> DB), simple logs are insufficient. Tracing allows us to follow a single sensor reading through the entire pipeline.
+- **Performance Profiling**: We can pinpoint exactly which part of the ingestion pipeline or which SQL query is causing latency.
+- **Service Dependency Graph**: Automatically generated to prove the architectural integrity of the distributed system.

@@ -35,13 +35,17 @@ func main() {
 	// 0. Observability (Uptrace/OpenTelemetry)
 	upDSN := os.Getenv("UPTRACE_DSN")
 	if upDSN != "" {
+		log.Printf("[OTEL] Initializing Uptrace for service: api-gateway")
 		uptrace.ConfigureOpentelemetry(
 			uptrace.WithDSN(upDSN),
 			uptrace.WithServiceName("api-gateway"),
 			uptrace.WithServiceVersion("1.0.0"),
 			uptrace.WithDeploymentEnvironment("production"),
+			uptrace.WithLoggingEnabled(true), // Diagnostic: Log SDK errors to stdout
 		)
 		defer uptrace.Shutdown(context.Background())
+	} else {
+		log.Println("[OTEL] Tracing disabled (UPTRACE_DSN not set)")
 	}
 
 	// 1. Connect to Backend Services
@@ -92,6 +96,20 @@ func main() {
 
 	app.Use(otelfiber.Middleware())
 	app.Use(logger.New())
+
+	// REQUIREMENT: Simple Authentication (Page 2)
+	// We'll use a static API Key for this assessment.
+	const apiKey = "fieldpulse-secret-2026"
+	app.Use(func(c *fiber.Ctx) error {
+		// Skip for health/metrics if needed (not implemented here)
+		key := c.Get("X-API-Key")
+		if key != apiKey {
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Unauthorized. Please provide a valid X-API-Key header.",
+			})
+		}
+		return c.Next()
+	})
 
 	// 3. Routes
 	v1 := app.Group("/v1")
@@ -165,11 +183,17 @@ func (gw *Gateway) HandleQueryTelemetry(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.UserContext(), 5*time.Second)
 	defer cancel()
 
+	// Extract pagination (Requirement: Page 2)
+	limit := int32(c.QueryInt("limit", 100))
+	offset := int32(c.QueryInt("offset", 0))
+
 	resp, err := gw.telemetryClient.QueryTelemetry(ctx, &telemetrypb.QueryTelemetryRequest{
 		DeviceId:   id,
 		Resolution: res,
 		StartTime:  timestamppb.New(startTime),
 		EndTime:    timestamppb.New(endTime),
+		Limit:      limit,
+		Offset:     offset,
 	})
 	if err != nil { return mapgRPCErrorToFiber(err) }
 	return c.JSON(resp)
