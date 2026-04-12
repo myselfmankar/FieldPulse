@@ -1,7 +1,7 @@
 connectors:
   - name: "client-a-factory"
     broker_url: "tcp://localhost:1883" # Using local-remote instance
-    client_id: "fieldpulse-connector-client-a"
+    client_id: "fieldpulse-connector-client-a-v2"
     # No credentials: remote broker uses allow_anonymous=true
     topics:
       - remote_pattern: "factory/line-1/+/data"
@@ -16,7 +16,7 @@ connectors:
 
   - name: "client-b-warehouse"
     broker_url: "tcp://localhost:1883"
-    client_id: "fieldpulse-connector-client-b"
+    client_id: "fieldpulse-connector-client-b-v2"
     topics:
       - remote_pattern: "warehouse/+/telemetry"
         device_id_extractor: "segment:1"

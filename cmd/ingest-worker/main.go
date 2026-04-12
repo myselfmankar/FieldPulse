@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -20,6 +19,7 @@ import (
 	"github.com/uptrace/uptrace-go/uptrace"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -27,6 +27,7 @@ import (
 var tracer = otel.Tracer("ingest-worker")
 
 func main() {
+	log.Println("Ingest Worker initializing...")
 	// 1. Configuration
 	mqttBroker := os.Getenv("MQTT_BROKER_URL")
 	if mqttBroker == "" {
@@ -48,6 +49,7 @@ func main() {
 			uptrace.WithDSN(upDSN),
 			uptrace.WithServiceName("ingest-worker"),
 			uptrace.WithServiceVersion("1.0.0"),
+			uptrace.WithDeploymentEnvironment("production"),
 		)
 		defer uptrace.Shutdown(context.Background())
 	}
@@ -96,8 +98,9 @@ func main() {
 		}
 		deviceID := parts[1]
 
-		var rd telemetry.Reading
-		if err := json.Unmarshal(msg.Payload(), &rd); err != nil {
+		// Parse the nested payload format
+		rd, err := telemetry.ParseIncomingPayload(msg.Payload())
+		if err != nil {
 			log.Printf("[%s] dropping malformed payload: %v", deviceID, err)
 			return
 		}
@@ -112,8 +115,7 @@ func main() {
 		}
 
 		// Start span for ingestion processing
-		// We use Links to connect back to the Connector's Publish span
-		_, span := tracer.Start(spanCtx, "Ingest Reading", trace.WithAttributes(
+		spanCtx, span := tracer.Start(spanCtx, "Ingest Reading", trace.WithAttributes(
 			attribute.String("device_id", deviceID),
 		), trace.WithSpanKind(trace.SpanKindConsumer))
 		defer span.End()
@@ -121,29 +123,37 @@ func main() {
 		// -- REQUIREMENT: VALIDATION --
 		if rd.Timestamp.After(time.Now().Add(5 * time.Second)) {
 			log.Printf("[%s] dropping reading with future timestamp: %v", deviceID, rd.Timestamp)
+			span.SetStatus(codes.Error, "future timestamp")
 			return
 		}
 
 		// -- REQUIREMENT: DEDUPLICATION (REDIS) --
 		// Using device_id + unix timestamp as the key
 		dedupKey := fmt.Sprintf("dedup:%s:%d", deviceID, rd.Timestamp.Unix())
-		isNew, err := rdb.SetNX(ctx, dedupKey, "1", 10*time.Minute).Result()
+		isNew, err := rdb.SetNX(spanCtx, dedupKey, "1", 10*time.Minute).Result()
 		if err != nil {
 			log.Printf("[%s] redis dedup error: %v", deviceID, err)
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "redis error")
 			return
 		}
 		if !isNew {
 			log.Printf("[%s] dropping duplicate reading for ts %v", deviceID, rd.Timestamp)
+			span.SetAttributes(attribute.Bool("duplicate", true))
 			return
 		}
 
 		// -- REQUIREMENT: PERSISTENCE (TIMESCALE) --
-		if err := repo.InsertReading(ctx, &rd); err != nil {
+		if err := repo.InsertReading(spanCtx, rd); err != nil {
 			log.Printf("[%s] persistence error: %v", deviceID, err)
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "persistence error")
 			return
 		}
 
-		log.Printf("[%s] ingested reading at %v", deviceID, rd.Timestamp)
+		span.SetStatus(codes.Ok, "ingested")
+		log.Printf("[%s] ingested reading at %v (temp=%.1f, vibe=%.1f, cur=%.1f)",
+			deviceID, rd.Timestamp, rd.Temperature, rd.Vibration, rd.CurrentMa)
 	}
 
 	if token := client.Subscribe("devices/+/telemetry", 1, handler); token.Wait() && token.Error() != nil {

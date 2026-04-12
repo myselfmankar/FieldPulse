@@ -16,12 +16,29 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	devicepb "github.com/myselfmankar/FieldPulse/proto/device"
 	"github.com/redis/go-redis/v9"
+	"github.com/uptrace/uptrace-go/uptrace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"github.com/uptrace/uptrace-go/uptrace"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 )
 
+var tracer = otel.Tracer("alert-service")
+
+// incomingTelemetry matches the nested wire format from Simulator/Connector.
+type incomingTelemetry struct {
+	Metrics struct {
+		Temperature float32 `json:"temperature_c"`
+		Vibration   float32 `json:"vibration_hz"`
+		Current     float32 `json:"current_ma"`
+	} `json:"metrics"`
+}
+
 func main() {
+	log.Println("Alert Service initializing...")
 	// 0. Observability (Uptrace/OpenTelemetry)
 	upDSN := os.Getenv("UPTRACE_DSN")
 	if upDSN != "" {
@@ -29,6 +46,7 @@ func main() {
 			uptrace.WithDSN(upDSN),
 			uptrace.WithServiceName("alert-service"),
 			uptrace.WithServiceVersion("1.0.0"),
+			uptrace.WithDeploymentEnvironment("production"),
 		)
 		defer uptrace.Shutdown(context.Background())
 	}
@@ -56,7 +74,10 @@ func main() {
 		log.Fatalf("failed to connect to redis: %v", err)
 	}
 
-	conn, err := grpc.Dial(deviceSvcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial(deviceSvcAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+	)
 	if err != nil {
 		log.Fatalf("failed to connect to device svc: %v", err)
 	}
@@ -86,10 +107,16 @@ func main() {
 		if len(parts) < 2 { return }
 		id := parts[1]
 
+		_, span := tracer.Start(ctx, "Evaluate Alert", trace.WithAttributes(
+			attribute.String("device_id", id),
+		), trace.WithSpanKind(trace.SpanKindConsumer))
+		defer span.End()
+
 		// a) Check Silence (Requirement: Manual Silencer)
 		silenced, _ := rdb.Exists(ctx, "silence:"+id).Result()
 		if silenced > 0 {
 			log.Printf("[%s] device is currently silenced, ignoring telemetry for alerts", id)
+			span.SetAttributes(attribute.Bool("silenced", true))
 			return
 		}
 
@@ -97,23 +124,31 @@ func main() {
 		t, err := deviceSvc.GetThreshold(ctx, &devicepb.GetThresholdRequest{DeviceId: id})
 		if err != nil {
 			log.Printf("[%s] could not fetch thresholds: %v", id, err)
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "threshold fetch failed")
 			return
 		}
 
-		// c) Parse Payload
-		var rd struct {
-			Temp    float32 `json:"temperature_c"`
-			Vibe    float32 `json:"vibration_hz"`
-			Current float32 `json:"current_ma"`
-		}
+		// c) Parse Payload (FIX: handle nested "metrics" structure)
+		var rd incomingTelemetry
 		if err := json.Unmarshal(msg.Payload(), &rd); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "unmarshal failed")
 			return
 		}
+
+		span.SetAttributes(
+			attribute.Float64("temp", float64(rd.Metrics.Temperature)),
+			attribute.Float64("vibe", float64(rd.Metrics.Vibration)),
+			attribute.Float64("current", float64(rd.Metrics.Current)),
+		)
 
 		// d) Evaluation & Alerting
-		evaluate(ctx, id, "temperature", rd.Temp, t.TempMax, rdb, mqttClient)
-		evaluate(ctx, id, "vibration", rd.Vibe, t.VibeMax, rdb, mqttClient)
-		evaluate(ctx, id, "current", rd.Current, t.CurrentMax, rdb, mqttClient)
+		evaluate(ctx, id, "temperature", rd.Metrics.Temperature, t.TempMax, rdb, mqttClient)
+		evaluate(ctx, id, "vibration", rd.Metrics.Vibration, t.VibeMax, rdb, mqttClient)
+		evaluate(ctx, id, "current", rd.Metrics.Current, t.CurrentMax, rdb, mqttClient)
+
+		span.SetStatus(codes.Ok, "evaluated")
 	}
 
 	client.Subscribe("devices/+/telemetry", 1, handler)
@@ -129,8 +164,8 @@ func evaluate(ctx context.Context, id, metric string, val, limit float32, rdb *r
 	}
 
 	// REQUIREMENT: Deduplication (Page 3)
-	// Only alert if we haven't already alerted for this specific breach
-	isAlreadyAlerted, _ := rdb.SetNX(ctx, fmt.Sprintf("alert_active:%s:%s", id, metric), "1", 24*time.Hour).Result()
+	// Only alert if we haven't already alerted for this specific breach in the last 5 minutes
+	isAlreadyAlerted, _ := rdb.SetNX(ctx, fmt.Sprintf("alert_active:%s:%s", id, metric), "1", 5*time.Minute).Result()
 	if !isAlreadyAlerted {
 		return
 	}

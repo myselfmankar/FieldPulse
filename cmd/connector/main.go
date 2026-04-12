@@ -17,8 +17,10 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	devicepb "github.com/myselfmankar/FieldPulse/proto/device"
 	"github.com/uptrace/uptrace-go/uptrace"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
@@ -70,7 +72,8 @@ type ConnectorService struct {
 }
 
 func main() {
-	// 1. Load Config
+	log.Println("MQTT Connector initializing...")
+	// 0. Observability (Uptrace/OpenTelemetry)
 	cfgData, err := os.ReadFile("configs/connectors.yaml")
 	if err != nil {
 		log.Fatalf("failed to read config: %v", err)
@@ -87,18 +90,20 @@ func main() {
 			uptrace.WithDSN(upDSN),
 			uptrace.WithServiceName("outbound-connector"),
 			uptrace.WithServiceVersion("1.0.0"),
+			uptrace.WithDeploymentEnvironment("production"),
 		)
 		defer uptrace.Shutdown(context.Background())
 	}
-
-	// 3. Initialize Internal Clients
 
 	// 3. Initialize Signal Handling
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Internal gRPC
-	conn, err := grpc.Dial("127.0.0.1:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Internal gRPC with OpenTelemetry interceptor
+	conn, err := grpc.Dial("127.0.0.1:50051",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+	)
 	if err != nil {
 		log.Fatalf("failed to connect device service: %v", err)
 	}
@@ -114,7 +119,7 @@ func main() {
 
 	opts := mqtt.NewClientOptions().
 		AddBroker("tls://localhost:8883").
-		SetClientID("outbound-connector-master").
+		SetClientID("outbound-connector-master-v2").
 		SetTLSConfig(internalTLS)
 
 	internalClient := mqtt.NewClient(opts)
@@ -193,13 +198,14 @@ func (s *ConnectorService) handleRemoteMessage(ctx context.Context, connName str
 	ctx, span := tracer.Start(ctx, fmt.Sprintf("Receive %s", msg.Topic()), trace.WithAttributes(
 		attribute.String("connector.name", connName),
 		attribute.String("remote.topic", msg.Topic()),
-	))
+	), trace.WithSpanKind(trace.SpanKindConsumer))
 	defer span.End()
 
 	// 1. Extract Device ID
 	deviceID := s.extractDeviceID(msg.Topic(), cfg)
 	if deviceID == "" {
 		span.SetAttributes(attribute.String("mapping.status", "dropped"))
+		span.SetStatus(codes.Error, "device ID extraction failed")
 		return
 	}
 	span.SetAttributes(attribute.String("internal.device_id", deviceID))
@@ -209,6 +215,7 @@ func (s *ConnectorService) handleRemoteMessage(ctx context.Context, connName str
 	if err != nil {
 		log.Printf("[%s] dropping message for unknown device: %s", connName, deviceID)
 		span.SetAttributes(attribute.String("mapping.status", "dropped"))
+		span.SetStatus(codes.Error, "device not found")
 		return
 	}
 
@@ -217,6 +224,8 @@ func (s *ConnectorService) handleRemoteMessage(ctx context.Context, connName str
 	if err != nil {
 		log.Printf("[%s:%s] normalization error: %v", connName, deviceID, err)
 		span.SetAttributes(attribute.String("mapping.status", "dropped"))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "normalization error")
 		return
 	}
 
@@ -227,18 +236,29 @@ func (s *ConnectorService) handleRemoteMessage(ctx context.Context, connName str
 	propagator.Inject(ctx, carrier)
 	normalized["_trace_context"] = carrier
 
-	// 5. Re-publish to internal broker
+	// 5. Re-publish to internal broker (Producer span)
+	_, pubSpan := tracer.Start(ctx, fmt.Sprintf("Publish devices/%s/telemetry", deviceID),
+		trace.WithSpanKind(trace.SpanKindProducer),
+		trace.WithAttributes(
+			attribute.String("device_id", deviceID),
+		),
+	)
+
 	payload, _ := json.Marshal(normalized)
 	targetTopic := fmt.Sprintf("devices/%s/telemetry", deviceID)
 	token := s.internalMQ.Publish(targetTopic, 1, false, payload)
 
 	if token.Wait() && token.Error() != nil {
 		span.SetAttributes(attribute.String("mapping.status", "error"))
+		pubSpan.RecordError(token.Error())
+		pubSpan.SetStatus(codes.Error, "publish failed")
 		log.Printf("[%s:%s] failed to bridge message: %v", connName, deviceID, token.Error())
 	} else {
 		span.SetAttributes(attribute.String("mapping.status", "ok"))
+		pubSpan.SetStatus(codes.Ok, "published")
 		log.Printf("[%s:%s] successfully bridged %d bytes to internal broker", connName, deviceID, len(payload))
 	}
+	pubSpan.End()
 }
 
 func (s *ConnectorService) extractDeviceID(topic string, cfg TopicConfig) string {

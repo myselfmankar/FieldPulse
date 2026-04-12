@@ -32,7 +32,6 @@ services:
       retries: 5
     volumes:
       - ./migrations/002_telemetry_schema.sql:/docker-entrypoint-initdb.d/01-telemetry.sql
-      - ./migrations/002_telemetry_hypertable.sql:/docker-entrypoint-initdb.d/02-hypertable.sql
 
   redis:
     image: redis:7-alpine

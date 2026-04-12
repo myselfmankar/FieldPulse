@@ -13,11 +13,13 @@ import (
 	"github.com/myselfmankar/FieldPulse/internal/device"
 	pb "github.com/myselfmankar/FieldPulse/proto/device"
 	"github.com/uptrace/uptrace-go/uptrace"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
 
 func main() {
+	log.Println("Device Service initializing...")
 	// 0. Observability (Uptrace/OpenTelemetry)
 	upDSN := os.Getenv("UPTRACE_DSN")
 	if upDSN != "" {
@@ -25,6 +27,7 @@ func main() {
 			uptrace.WithDSN(upDSN),
 			uptrace.WithServiceName("device-service"),
 			uptrace.WithServiceVersion("1.0.0"),
+			uptrace.WithDeploymentEnvironment("production"),
 		)
 		defer uptrace.Shutdown(context.Background())
 	}
@@ -53,13 +56,15 @@ func main() {
 	}
 	defer dbPool.Close()
 
-	// 3. Setup gRPC Server
+	// 3. Setup gRPC Server with OpenTelemetry instrumentation
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	s := grpc.NewServer()
+	s := grpc.NewServer(
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+	)
 	
 	// Initialize Repository and Service
 	repo := device.NewRepository(dbPool)

@@ -73,12 +73,10 @@ func GenerateDeviceBundle(deviceID string, caCertRaw []byte, caKeyRaw []byte) (*
 	deviceKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: deviceKeyBytes})
 	deviceCertPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: deviceCertDER})
 
-	// Re-encode CA Cert to PEM for the bundle
-	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCertRaw})
-
+	// caCertRaw is already PEM-encoded (read from .crt file), pass directly
 	return &ProvisioningBundle{
 		DeviceID:   deviceID,
-		CACert:     caPEM,
+		CACert:     caCertRaw,
 		ClientCert: deviceCertPEM,
 		ClientKey:  deviceKeyPEM,
 	}, nil
