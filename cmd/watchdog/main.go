@@ -28,11 +28,15 @@ func main() {
 	log.Println("Watchdog initializing...")
 	upDSN := os.Getenv("UPTRACE_DSN")
 	if upDSN != "" {
+		log.Printf("[OTEL] Initializing Uptrace for service: status-watchdog")
 		uptrace.ConfigureOpentelemetry(
 			uptrace.WithDSN(upDSN),
 			uptrace.WithServiceName("status-watchdog"),
+			uptrace.WithLoggingEnabled(true),
 		)
 		defer uptrace.Shutdown(context.Background())
+	} else {
+		log.Println("[OTEL] Tracing disabled (UPTRACE_DSN not set)")
 	}
 
 	dbURL := os.Getenv("TELEMETRY_DB_URL")

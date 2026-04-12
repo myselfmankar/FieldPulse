@@ -24,13 +24,17 @@ func main() {
 	// 0. Observability (Uptrace/OpenTelemetry)
 	upDSN := os.Getenv("UPTRACE_DSN")
 	if upDSN != "" {
+		log.Printf("[OTEL] Initializing Uptrace for service: telemetry-service")
 		uptrace.ConfigureOpentelemetry(
 			uptrace.WithDSN(upDSN),
 			uptrace.WithServiceName("telemetry-service"),
 			uptrace.WithServiceVersion("1.0.0"),
 			uptrace.WithDeploymentEnvironment("production"),
+			uptrace.WithLoggingEnabled(true),
 		)
 		defer uptrace.Shutdown(context.Background())
+	} else {
+		log.Println("[OTEL] Tracing disabled (UPTRACE_DSN not set)")
 	}
 
 	// 1. Load Configuration

@@ -34,11 +34,15 @@ func main() {
 	log.Println("Simulator initializing...")
 	upDSN := os.Getenv("UPTRACE_DSN")
 	if upDSN != "" {
+		log.Printf("[OTEL] Initializing Uptrace for service: device-simulator")
 		uptrace.ConfigureOpentelemetry(
 			uptrace.WithDSN(upDSN),
 			uptrace.WithServiceName("device-simulator"),
+			uptrace.WithLoggingEnabled(true),
 		)
 		defer uptrace.Shutdown(context.Background())
+	} else {
+		log.Println("[OTEL] Tracing disabled (UPTRACE_DSN not set)")
 	}
 
 	// 1. Config & Environment Prioritization
@@ -77,7 +81,7 @@ func main() {
 		wg.Add(1)
 		go simulateDevice(ctx, DeviceConfig{
 			ID:        deviceID,
-			BrokerURL: *brokerURL,
+			BrokerURL: finalBrokerURL,
 			TLSConfig: tlsConfig,
 			Remote:    *modeRemote,
 		}, &wg)
