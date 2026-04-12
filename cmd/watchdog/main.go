@@ -12,7 +12,9 @@ import (
 	devicepb "github.com/myselfmankar/FieldPulse/proto/device"
 	"github.com/uptrace/uptrace-go/uptrace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 func main() {
@@ -101,6 +103,11 @@ func checkDeviceHealth(ctx context.Context, db *pgxpool.Pool, client devicepb.De
 			Status:   "silent",
 		})
 		if err != nil {
+			st, ok := status.FromError(err)
+			if ok && st.Code() == codes.NotFound {
+				log.Printf("Watchdog: Device %s not found in registry. Skipping stale record.", deviceID)
+				continue
+			}
 			log.Printf("watchdog update fail for %s: %v", deviceID, err)
 		}
 	}
