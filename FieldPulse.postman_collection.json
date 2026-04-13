@@ -1,0 +1,50 @@
+{
+	"info": {
+		"name": "FieldPulse IoT API",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Device Management",
+			"item": [
+				{
+					"name": "Register Device",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "X-API-Key", "value": "fieldpulse-secret-2026", "type": "text"},
+							{"key": "Content-Type", "value": "application/json", "type": "text"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"device_id\": \"sim-device-001\",\n    \"device_type\": \"vibration_sensor\",\n    \"floor\": \"Floor-1\",\n    \"firmware_ver\": \"1.0.1\"\n}"
+						},
+						"url": { "raw": "http://localhost:3000/v1/devices", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["v1", "devices"] }
+					}
+				},
+				{
+					"name": "Silence Device",
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "X-API-Key", "value": "fieldpulse-secret-2026", "type": "text"}
+						],
+						"url": { "raw": "http://localhost:3000/v1/devices/sim-device-001/silence?duration=10m", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["v1", "devices", "sim-device-001", "silence"], "query": [{"key": "duration", "value": "10m"}] }
+					}
+				}
+			]
+		},
+		{
+			"name": "Telemetry Retrieval",
+			"item": [
+				{
+					"name": "Query Telemetry",
+					"request": {
+						"method": "GET",
+						"url": { "raw": "http://localhost:3000/v1/telemetry?device_id=sim-device-001", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["v1", "telemetry"], "query": [{"key": "device_id", "value": "sim-device-001"}] }
+					}
+				}
+			]
+		}
+	]
+}
